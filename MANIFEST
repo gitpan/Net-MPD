@@ -1,0 +1,13 @@
+Build.PL
+Changes
+LICENSE
+MANIFEST
+META.json
+META.yml
+README
+cpanfile
+dist.ini
+lib/Net/MPD.pm
+lib/Net/MPD/Response.pm
+t/basic.t
+t/release-pod-syntax.t
