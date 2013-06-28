@@ -11,7 +11,7 @@ use Scalar::Util qw'looks_like_number';
 
 use 5.010;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =encoding utf-8
 
@@ -75,12 +75,8 @@ sub _send {
 
   my $string = "$command";
   foreach my $arg (@args) {
-    if ($arg =~ /[\s"]/) {
-      $arg =~ s/"/\\"/g;
-      $string .= qq{ "$arg"};
-    } else {
-      $string .= qq{ $arg};
-    }
+    $arg =~ s/"/\\"/g;
+    $string .= qq{ "$arg"};
   }
   $string .= "\n";
 
@@ -155,6 +151,25 @@ sub _attribute {
   });
 }
 
+my $default_parser = sub {
+  my $result = shift;
+
+  my @items = ();
+  my $item = {};
+  foreach my $line ($result->lines) {
+    my ($key, $value) = split /: /, $line, 2;
+    if (exists $item->{$key}) {
+      push @items, 2 > keys %$item ? values %$item : $item;
+      $item = {};
+    }
+    $item->{$key} = $value;
+  }
+
+  push @items, 2 > keys %$item ? values %$item : $item;
+
+  return wantarray ? @items : $items[0];
+};
+
 sub _command {
   my ($class, $name, %options) = @_;
 
@@ -162,6 +177,7 @@ sub _command {
 
   $options{command} //= $normal_name;
   $options{args}    //= [];
+  $options{parser}  //= $default_parser;
 
   $class->_inject($name => sub {
     my $self = shift;
@@ -170,40 +186,21 @@ sub _command {
       carp $result->message;
       return undef;
     } else {
-      my @items = ();
-      my $item = {};
-      foreach my $line ($result->lines) {
-        my ($key, $value) = split /: /, $line, 2;
-        if (exists $item->{$key}) {
-          push @items, 2 > keys %$item ? values %$item : $item;
-          $item = {};
-        }
-        $item->{$key} = $value;
-      }
-
-      push @items, 2 > keys %$item ? values %$item : $item;
-
-      return 2 > @items ? $items[0] : @items;
+      return $options{parser}->($result);
     }
   });
 }
 
 =head1 METHODS
 
-=head2 connect
+=head2 connect [$address]
 
-=over 4
+Connect to the MPD running at the given address.  Address takes the form of
+password@host:port.  Both the password and port are optional.  If no password is
+given, none will be used.  If no port is given, the default (6600) will be used.
+If no host is given, C<localhost> will be used.
 
-=item Arguments: [$address]
-
-=back
-
-Connects to the MPD running at the given address.  Address takes the form of
-password@host:port.  Both the password and port are optional.  If no password
-is given, none will be used.  If no port is given, the default (6600) will be
-used.  If no host is given, C<localhost> will be used.
-
-Returns a Net::MPD object on success and croaks on failure.
+Return a Net::MPD object on success and croaks on failure.
 
 =cut
 
@@ -229,7 +226,7 @@ sub connect {
 
 =head2 version
 
-Returns the API version of the connected MPD server.
+Return the API version of the connected MPD server.
 
 =cut
 
@@ -240,7 +237,7 @@ sub version {
 
 =head2 update_status
 
-Issues a C<status> command to MPD and stores the results in the local object.
+Issue a C<status> command to MPD and stores the results in the local object.
 The results are also returned as a hashref.
 
 =cut
@@ -356,158 +353,465 @@ The commands are mostly the same as the L<MPD
 protocol|http://www.musicpd.org/doc/protocol/index.html> but some have been
 renamed slightly.
 
+=head2 clear_error
+
+Clear the current error message in status.  This can also be done by issuing any
+command that starts playback.
+
+=head2 current_song
+
+Return the song info for the current song.
+
+=head2 idle [@subsystems]
+
+Block until a noteworth change in one or more of MPD's subsystems.  As soon as
+there is one, a list of all changed subsystems will be returned.  If any
+subsystems are given as arguments, only those subsystems will be monitored.  The
+following subsystems are available:
+
 =over 4
 
-=item clear_error
+=item database
 
-=item current_song
+The song database has been changed after an update.
 
-=item idle
+=item udpate
 
-=item stats
+A database update has started or finished.
 
-=item next
+=item stored_playlist
 
-=item pause
+A stored playlist has been modified.
 
-=item play
+=item playlist
 
-=item play_id
+The current playlist has been modified.
 
-=item previous
+=item player
 
-=item seek
+Playback has been started stopped or seeked.
 
-=item seek_id
+=item mixer
 
-=item seek_cur
+The volume has been adjusted.
 
-=item stop
+=item output
 
-=item add
-
-=item add_id
-
-=item clear
-
-=item delete
-
-=item delete_id
-
-=item move
-
-=item move_id
-
-=item playlist_find
-
-=item playlist_id
-
-=item playlist_info
-
-=item playlist_search
-
-=item playlist_changes
-
-=item playlist_changes_pos_id
-
-=item prio
-
-=item prio_id
-
-=item shuffle
-
-=item swap
-
-=item swapid
-
-=item list_playlist
-
-=item list_playlist_info
-
-=item list_playlists
-
-=item load
-
-=item playlist_add
-
-=item playlist_clear
-
-=item playlist_delete
-
-=item playlist_move
-
-=item rename
-
-=item rm
-
-=item save
-
-=item count
-
-=item find
-
-=item find_add
-
-=item list
-
-=item list_all
-
-=item list_all_info
-
-=item ls_info
-
-=item search
-
-=item search_add
-
-=item search_add_pl
-
-=item update
-
-=item rescan
+An audio output has been enabled or disabled.
 
 =item sticker
 
-=item close
+The sticket database has been modified.
 
-=item kill
+=item subscription
 
-=item ping
+A client has subscribed or unsubscribed from a channel.
 
-=item disable_output
+=item message
 
-=item enable_output
-
-=item outputs
-
-=item config
-
-=item commands
-
-=item not_commands
-
-=item tag_types
-
-=item url_handlers
-
-=item decoders
-
-=item subscribe
-
-=item unsubscribe
-
-=item channels
-
-=item read_messages
-
-=item send_message
+A message was received on a channel this client is watching.
 
 =back
 
+=head2 stats
+
+Return a hashref with some stats about the database.
+
+=head2 next
+
+Play the next song in the playlist.
+
+=head2 pause $state
+
+Set the pause state.  Use 0 for playing and 1 for paused.
+
+=head2 play [$position]
+
+Start playback (optionally at the given position).
+
+=head2 play_id [$id]
+
+Start playback (optionally with the given song).
+
+=head2 previous
+
+Play the previous song in the playlist.
+
+=head2 seek $position $time
+
+Seek to $time seconds in the given song position.
+
+=head2 seek_id $id $time
+
+Seek to $time seconds in the given song.
+
+=head2 seek_cur $time
+
+Seek to $time seconds in the current song.
+
+=head2 stop
+
+Stop playing.
+
+=head2 add $path
+
+Add the file (or directory, recursively) at $path to the current playlist.
+
+=head2 add_id $path [$position]
+
+Add the file at $path (optionally at $position) to the playlist and return the
+id.
+
+=head2 clear
+
+Clear the current playlist.
+
+=head2 delete $position
+
+Remove the song(s) in the given position from the current playlist.
+
+=head2 delete_id $id
+
+Remove the song with the given id from the current playlist.
+
+=head2 move $from $to
+
+Move the song from position $from to $to.
+
+=head2 move_id $id $to
+
+Move the song with the given id to position $to.
+
+=head2 playlist_find $tag $search
+
+Search the current playlist for songs with $tag exactly matching $search.
+
+=head2 playlist_id $id
+
+Return song information for the song with the given id.
+
+=head2 playlist_info [$position]
+
+Return song information for every song in the current playlist (or optionally
+the one at the given position).
+
+=head2 playlist_search $tag $search
+
+Search the current playlist for songs with $tag partially matching $search.
+
+=head2 playlist_changes $version
+
+Return song information for songs changed since the given version of the current
+playlist.
+
+=head2 playlist_changes_pos_id $version
+
+Return position and id information for songs changed since the given version of
+the current playlist.
+
+=head2 prio $priority $position
+
+Set the priority of the song at the given position.
+
+=head2 prio_id $priority $id
+
+Set the priority of the song with the given id.
+
+=head2 shuffle
+
+Shuffle the current playlist.
+
+=head2 swap $pos1 $pos2
+
+Swap the positions of the songs at the given positions.
+
+=head2 swapid $id1 $id2
+
+Swap the positions of the songs with the given ids.
+
+=head2 list_playlist $name
+
+Return a list of all the songs in the named playlist.
+
+=head2 list_playlist_info $name
+
+Return all the song information for the named playlist.
+
+=head2 list_playlists
+
+Return a list of the stored playlists.
+
+=head2 load $name
+
+Add the named playlist to the current playlist.
+
+=head2 playlist_add $name $path
+
+Add the given path to the named playlist.
+
+=head2 playlist_clear $name
+
+Clear the named playlist.
+
+=head2 playlist_delete $name $position
+
+Remove the song at the given position from the named playlist.
+
+=head2 playlist_move $name $id $pos
+
+Move the song with the given id to the given position in the named playlist.
+
+=head2 rename $name $new_name
+
+Rename the named playlist to $new_name.
+
+=head2 rm $name
+
+Delete the named playlist.
+
+=head2 save $name
+
+Save the current playlist with the given name.
+
+=head2 count $tag $search ...
+
+Return a count and playtime for all items with $tag exactly matching $search.
+Multiple pairs of $tag/$search parameters can be given.
+
+=head2 find $tag $search ...
+
+Return song information for all items with $tag exactly matching $search.  The
+special tag 'any' can be used to search all tag.  The special tag 'file' can be
+used to search by path.
+
+=head2 find_add $tag $search
+
+Search as with C<find> and add any matches to the current playlist.
+
+=head2 list $tag [$artist]
+
+Return all the values for the given tag.  If the tag is 'album', an artist can
+optionally be given to further limit the results.
+
+=head2 list_all [$path]
+
+Return a list of all the songs and directories (optionally under $path).
+
+=head2 list_all_info [$path]
+
+Return a list of all the songs as with C<listall> but include metadata.
+
+=head2 search $tag $search ...
+
+As C<find> but with partial, case-insensitive searching.
+
+=head2 search_add $tag $search ...
+
+As C<search> but adds the results to the current playlist.
+
+=head2 search_add_pl $name $tag $search ...
+
+As C<search> but adds the results the named playlist.
+
+=head2 update [$path]
+
+Update the database (optionally under $path) and return a job id.
+
+=head2 rescan [$path]
+
+As <update> but forces rescan of unmodified files.
+
+=head2 sticker_value $type $path $name [$value]
+
+Return the sticker value for the given item after optionally setting it to
+$value.  Use an undefined value to delete the sticker.
+
 =cut
 
+sub sticker_value {
+  my ($self, $type, $path, $name, $value) = @_;
+
+  if (@_ > 4) {
+    if (defined $value) {
+      my $result = $self->_send('sticker', 'set', $type, $path, $name, $value);
+      carp $result->message and return undef if $result->is_error;
+      return $value;
+    } else {
+      my $result = $self->_send('sticker', 'delete', $type, $path, $name);
+      carp $result->message if $result->is_error;
+      return undef;
+    }
+  } else {
+    my $result = $self->_send('sticker', 'get', $type, $path, $name);
+    carp $result->message and return undef if $result->is_error;
+
+    my ($line) = $result->lines;
+    my ($val) = ($line =~ /^sticker: \Q$name\E=(.*)$/);
+    return $val;
+  }
+}
+
+=head2 sticker_list $type $path
+
+Return a hashref of the stickers for the given item.
+
+=cut
+
+sub sticker_list {
+  my ($self, $type, $path) = @_;
+
+  my $result = $self->_send('sticker', 'list', $type, $path);
+  carp $result->message and return undef if $result->is_error;
+
+  my $stickers = {};
+  foreach my $line ($result->lines) {
+    my ($key, $value) = ($line =~ /^sticker: (.*)=(.*)$/);
+    $stickers->{$key} = $value;
+  }
+
+  return $stickers;
+}
+
+=head2 sticker_find $type $name [$path]
+
+Return a list of all the items (optionally under $path) with a sticker of the given name.
+
+=cut
+
+sub sticker_find {
+  my ($self, $type, $name, $path) = @_;
+  $path //= '';
+
+  my $result = $self->_send('sticker', 'find', $type, $path, $name);
+  carp $result->message and return undef if $result->is_error;
+
+  my @items = ();
+  my $file = '';
+
+  foreach my $line ($result->lines) {
+    my ($key, $value) = split /: /, $line, 2;
+    if ($key eq 'file') {
+      $file = $value;
+    } elsif ($key eq 'sticker') {
+      my ($val) = ($value =~ /^\Q$name\E=(.*)$/);
+      push @items, { file => $file, sticker => $val };
+    }
+  }
+
+  return @items;
+}
+
+=head2 close
+
+Close the connection.  This is pretty worthless as the library will just
+reconnect for the next command.
+
+=head2 kill
+
+Kill the MPD server.
+
+=head2 ping
+
+Do nothing.  This can be used to keep an idle connection open.  If you want to
+wait for noteworthy events, the C<idle> command is better suited.
+
+=head2 disable_output $id
+
+Disable the given output.
+
+=head2 enable_output $id
+
+Enable the given output.
+
+=head2 outputs
+
+Return a list of the available outputs.
+
+=head2 commands
+
+Return a list of the available commands.
+
+=head2 not_commands
+
+Return a list of the unavailable commands.
+
+=head2 tag_types
+
+Return a list of all the avalable song metadata.
+
+=head2 url_handlers
+
+Return a list of available url handlers.
+
+=head2 decoders
+
+Return a list of available decoder plugins, along with the MIME types and file
+extensions associated with them.
+
+=head2 subscribe $channel
+
+Subscribe to the named channel.
+
+=head2 unsubscribe $channel
+
+Unsubscribe from the named channel.
+
+=head2 channels
+
+Return a list of the channels with active clients.
+
+=head2 read_messages
+
+Return a list of any available messages for this clients subscribed channels.
+
+=head2 send_message $channel $message
+
+Send a message to the given channel.
+
+=cut
+
+my $song_parser = sub {
+  my $result = shift;
+
+  my @songs = ();
+  my $song = {};
+
+  foreach my $line ($result->lines) {
+    my ($key, $value) = split /: /, $line, 2;
+
+    if ($key =~ /^(?:file|directory|playlist)$/) {
+      push @songs, $song if exists $song->{type};
+      $song = { type => $key, uri => $value };
+    } else {
+      $song->{$key} = $value;
+    }
+  }
+
+  return @songs, $song;
+};
+
+my $decoder_parser = sub {
+  my $result = shift;
+
+  my @plugins = ();
+  my $plugin = {};
+
+  foreach my $line ($result->lines) {
+    my ($key, $value) = split /: /, $line, 2;
+
+    if ($key eq 'plugin') {
+      push @plugins, $plugin if exists $plugin->{name};
+      $plugin = { name => $value };
+    } else {
+      push @{$plugin->{$key}}, $value;
+    }
+  }
+
+  return @plugins, $plugin;
+};
+
 __PACKAGE__->_command('clear_error');
-__PACKAGE__->_command('current_song');
+__PACKAGE__->_command('current_song', parser => $song_parser);
 __PACKAGE__->_command('idle');
 __PACKAGE__->_command('stats');
 __PACKAGE__->_command('next');
@@ -526,19 +830,19 @@ __PACKAGE__->_command('delete');
 __PACKAGE__->_command('delete_id');
 __PACKAGE__->_command('move');
 __PACKAGE__->_command('move_id');
-__PACKAGE__->_command('playlist_find');
-__PACKAGE__->_command('playlist_id');
-__PACKAGE__->_command('playlist_info');
-__PACKAGE__->_command('playlist_search');
-__PACKAGE__->_command('playlist_changes', command => 'plchanges');
+__PACKAGE__->_command('playlist_find', parser => $song_parser);
+__PACKAGE__->_command('playlist_id', parser => $song_parser);
+__PACKAGE__->_command('playlist_info', parser => $song_parser);
+__PACKAGE__->_command('playlist_search', parser => $song_parser);
+__PACKAGE__->_command('playlist_changes', command => 'plchanges', parser => $song_parser);
 __PACKAGE__->_command('playlist_changes_pos_id', command => 'plchangesposid');
 __PACKAGE__->_command('prio');
 __PACKAGE__->_command('prio_id');
 __PACKAGE__->_command('shuffle');
 __PACKAGE__->_command('swap');
 __PACKAGE__->_command('swapid');
-__PACKAGE__->_command('list_playlist');
-__PACKAGE__->_command('list_playlist_info');
+__PACKAGE__->_command('list_playlist', parser => $song_parser);
+__PACKAGE__->_command('list_playlist_info', parser => $song_parser);
 __PACKAGE__->_command('list_playlists');
 __PACKAGE__->_command('load');
 __PACKAGE__->_command('playlist_add');
@@ -549,13 +853,13 @@ __PACKAGE__->_command('rename');
 __PACKAGE__->_command('rm');
 __PACKAGE__->_command('save');
 __PACKAGE__->_command('count');
-__PACKAGE__->_command('find');
+__PACKAGE__->_command('find', parser => $song_parser);
 __PACKAGE__->_command('find_add');
 __PACKAGE__->_command('list');
-__PACKAGE__->_command('list_all');
-__PACKAGE__->_command('list_all_info');
-__PACKAGE__->_command('ls_info');
-__PACKAGE__->_command('search');
+__PACKAGE__->_command('list_all', parser => $song_parser);
+__PACKAGE__->_command('list_all_info', parser => $song_parser);
+__PACKAGE__->_command('ls_info', parser => $song_parser);
+__PACKAGE__->_command('search', parser => $song_parser);
 __PACKAGE__->_command('search_add');
 __PACKAGE__->_command('search_add_pl');
 __PACKAGE__->_command('update');
@@ -572,7 +876,7 @@ __PACKAGE__->_command('commands');
 __PACKAGE__->_command('not_commands');
 __PACKAGE__->_command('tag_types');
 __PACKAGE__->_command('url_handlers');
-__PACKAGE__->_command('decoders');
+__PACKAGE__->_command('decoders', parser => $decoder_parser);
 __PACKAGE__->_command('subscribe');
 __PACKAGE__->_command('unsubscribe');
 __PACKAGE__->_command('channels');
